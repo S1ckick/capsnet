@@ -1,4 +1,5 @@
-from tensorflow.keras import initializers, layers
+import math
+import pandas
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import layers, models, optimizers
@@ -6,12 +7,9 @@ from tensorflow.keras import backend as K
 from tensorflow.keras.utils import to_categorical
 import matplotlib.pyplot as plt
 from PIL import Image
-import math
-import pandas
 
-K.set_image_data_format('channels_last')
+from tensorflow.keras import initializers, layers
 
-#Рисуем график
 def plot_log(filename, show=True):
 
     data = pandas.read_csv(filename)
@@ -256,6 +254,9 @@ def combine_images(generated_images, height=None, width=None):
             img[:, :, 0]
     return image
 
+
+K.set_image_data_format('channels_last')
+
 def CapsNet(input_shape, n_class, routings, batch_size):
     """
     A Capsule Network on MNIST.
@@ -301,8 +302,8 @@ def CapsNet(input_shape, n_class, routings, batch_size):
     decoder.add(layers.Reshape(target_shape=input_shape, name='out_recon'))
 
     # Models for training and evaluation (prediction)
-    train_model = models.Model([x, y], [digitcaps, decoder(masked_by_y)])
-    eval_model = models.Model(x, [digitcaps, decoder(masked)])
+    train_model = models.Model([x, y], [out_caps, decoder(masked_by_y)])
+    eval_model = models.Model(x, [out_caps, decoder(masked)])
 
     # manipulate model
     noise = layers.Input(shape=(n_class, 16))
