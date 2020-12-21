@@ -10,6 +10,7 @@ from PIL import Image
 
 from tensorflow.keras import initializers, layers
 
+#выводим график
 def plot_log(filename, show=True):
 
     data = pandas.read_csv(filename)
@@ -351,28 +352,9 @@ def train(model,  # type: models.Model
                   loss_weights=[1., args.lam_recon],
                   metrics={'capsnet': 'accuracy'})
 
-    """
     # Training without data augmentation:
     model.fit([x_train, y_train], [y_train, x_train], batch_size=args.batch_size, epochs=args.epochs,
-              validation_data=[[x_test, y_test], [y_test, x_test]], callbacks=[log, tb, checkpoint, lr_decay])
-    """
-
-    # Begin: Training with data augmentation ---------------------------------------------------------------------#
-    def train_generator(x, y, batch_size, shift_fraction=0.):
-        train_datagen = ImageDataGenerator(width_shift_range=shift_fraction,
-                                           height_shift_range=shift_fraction)  # shift up to 2 pixel for MNIST
-        generator = train_datagen.flow(x, y, batch_size=batch_size)
-        while 1:
-            x_batch, y_batch = generator.next()
-            yield (x_batch, y_batch), (y_batch, x_batch)
-
-    # Training with data augmentation. If shift_fraction=0., no augmentation.
-    model.fit(train_generator(x_train, y_train, args.batch_size, args.shift_fraction),
-              steps_per_epoch=int(y_train.shape[0] / args.batch_size),
-              epochs=args.epochs,
-              validation_data=((x_test, y_test), (y_test, x_test)), batch_size=args.batch_size,
-              callbacks=[log, checkpoint, lr_decay])
-    # End: Training with data augmentation -----------------------------------------------------------------------#
+              validation_data=[[x_test, y_test], [y_test, x_test]], callbacks=[log, checkpoint, lr_decay])
 
     model.save_weights(args.save_dir + '/trained_model.h5')
     print('Trained model saved to \'%s/trained_model.h5\'' % args.save_dir)
