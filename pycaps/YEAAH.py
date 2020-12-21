@@ -7,12 +7,12 @@ from tensorflow.keras import backend as K
 from tensorflow.keras.utils import to_categorical
 import matplotlib.pyplot as plt
 from PIL import Image
-
 from tensorflow.keras import initializers, layers
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
 
 #выводим график
 def plot_log(filename, show=True):
-
     data = pandas.read_csv(filename)
 
     fig = plt.figure(figsize=(4,6))
@@ -235,27 +235,6 @@ def PrimaryCap(inputs, dim_capsule, n_channels, kernel_size, strides, padding):
     return layers.Lambda(squash, name='primarycap_squash')(outputs)
 
 
-def combine_images(generated_images, height=None, width=None):
-    num = generated_images.shape[0]
-    if width is None and height is None:
-        width = int(math.sqrt(num))
-        height = int(math.ceil(float(num)/width))
-    elif width is not None and height is None:  # height not given
-        height = int(math.ceil(float(num)/width))
-    elif height is not None and width is None:  # width not given
-        width = int(math.ceil(float(num)/height))
-
-    shape = generated_images.shape[1:3]
-    image = np.zeros((height*shape[0], width*shape[1]),
-                     dtype=generated_images.dtype)
-    for index, img in enumerate(generated_images):
-        i = int(index/width)
-        j = index % width
-        image[i*shape[0]:(i+1)*shape[0], j*shape[1]:(j+1)*shape[1]] = \
-            img[:, :, 0]
-    return image
-
-
 K.set_image_data_format('channels_last')
 
 def CapsNet(input_shape, n_class, routings, batch_size):
@@ -352,9 +331,28 @@ def train(model,  # type: models.Model
                   loss_weights=[1., args.lam_recon],
                   metrics={'capsnet': 'accuracy'})
 
+    """
     # Training without data augmentation:
     model.fit([x_train, y_train], [y_train, x_train], batch_size=args.batch_size, epochs=args.epochs,
-              validation_data=[[x_test, y_test], [y_test, x_test]], callbacks=[log, checkpoint, lr_decay])
+              validation_data=[[x_test, y_test], [y_test, x_test]], callbacks=[log, tb, checkpoint, lr_decay])
+    """
+
+    # Begin: Training with data augmentation ---------------------------------------------------------------------#
+    def train_generator(x, y, batch_size, shift_fraction=0.):
+        train_datagen = ImageDataGenerator(width_shift_range=shift_fraction,
+                                           height_shift_range=shift_fraction)  # shift up to 2 pixel for MNIST
+        generator = train_datagen.flow(x, y, batch_size=batch_size)
+        while 1:
+            x_batch, y_batch = generator.next()
+            yield (x_batch, y_batch), (y_batch, x_batch)
+
+    # Training with data augmentation. If shift_fraction=0., no augmentation.
+    model.fit(train_generator(x_train, y_train, args.batch_size, args.shift_fraction),
+              steps_per_epoch=int(y_train.shape[0] / args.batch_size),
+              epochs=args.epochs,
+              validation_data=((x_test, y_test), (y_test, x_test)), batch_size=args.batch_size,
+              callbacks=[log, checkpoint, lr_decay])
+    # End: Training with data augmentation -----------------------------------------------------------------------#
 
     model.save_weights(args.save_dir + '/trained_model.h5')
     print('Trained model saved to \'%s/trained_model.h5\'' % args.save_dir)
@@ -379,32 +377,6 @@ def test(model, data, args):
     plt.imshow(plt.imread(args.save_dir + "/real_and_recon.png"))
     plt.show()
 
-
-def manipulate_latent(model, data, args):
-    print('-' * 30 + 'Begin: manipulate' + '-' * 30)
-    x_test, y_test = data
-    index = np.argmax(y_test, 1) == args.digit
-    number = np.random.randint(low=0, high=sum(index) - 1)
-    x, y = x_test[index][number], y_test[index][number]
-    x, y = np.expand_dims(x, 0), np.expand_dims(y, 0)
-    noise = np.zeros([1, 10, 16])
-    x_recons = []
-    for dim in range(16):
-        for r in [-0.25, -0.2, -0.15, -0.1, -0.05, 0, 0.05, 0.1, 0.15, 0.2, 0.25]:
-            tmp = np.copy(noise)
-            tmp[:, :, dim] = r
-            x_recon = model.predict([x, y, tmp])
-            x_recons.append(x_recon)
-
-    x_recons = np.concatenate(x_recons)
-
-    img = combine_images(x_recons, height=16)
-    image = img * 255
-    Image.fromarray(image.astype(np.uint8)).save(args.save_dir + '/manipulate-%d.png' % args.digit)
-    print('manipulated result saved to %s/manipulate-%d.png' % (args.save_dir, args.digit))
-    print('-' * 30 + 'End: manipulate' + '-' * 30)
-
-
 def load_mnist():
     # the data, shuffled and split between train and test sets
     from tensorflow.keras.datasets import mnist
@@ -420,7 +392,6 @@ def load_mnist():
 if __name__ == "__main__":
     import os
     import argparse
-    from tensorflow.keras.preprocessing.image import ImageDataGenerator
     from tensorflow.keras import callbacks
 
     # setting the hyper parameters
@@ -440,11 +411,11 @@ if __name__ == "__main__":
     parser.add_argument('--debug', action='store_true',
                         help="Save weights by TensorBoard")
     parser.add_argument('--save_dir', default='./result')
-    parser.add_argument('-t', '--testing', action='store_true',
+    parser.add_argument('-t', '--testing', default=True,
                         help="Test the trained model on testing dataset")
     parser.add_argument('--digit', default=5, type=int,
                         help="Digit to manipulate")
-    parser.add_argument('-w', '--weights', default=None,
+    parser.add_argument('-w', '--weights', default='./result/trained_model.h5',
                         help="The path of the saved weights. Should be specified when testing")
     args = parser.parse_known_args()[0]
     print(args)
@@ -470,5 +441,5 @@ if __name__ == "__main__":
     else:  # as long as weights are given, will run testing
         if args.weights is None:
             print('No weights are provided. Will test using random initialized weights.')
-        manipulate_latent(manipulate_model, (x_test, y_test), args)
+        #manipulate_latent(manipulate_model, (x_test, y_test), args)
         test(model=eval_model, data=(x_test, y_test), args=args)
